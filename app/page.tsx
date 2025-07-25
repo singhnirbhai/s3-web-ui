@@ -29,14 +29,14 @@ export default function Home() {
     window.open(`https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`, "_blank");
   };
 
-  // Upload to root
+  // Upload to current directory
   const handleRootUpload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const fileInput = form.elements.namedItem("file") as HTMLInputElement;
     if (!fileInput.files?.length) return;
     const file = fileInput.files[0];
-    const key = file.name; // upload to root
+    const key = prefix + file.name; // upload to current directory
     const res = await fetch(`/api/upload?key=${encodeURIComponent(key)}`);
     const { url } = await res.json();
     await fetch(url, {
@@ -47,7 +47,7 @@ export default function Home() {
     window.location.reload();
   };
 
-  // Create folder at root
+  // Create folder in current directory
   const handleCreateFolder = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
@@ -55,10 +55,21 @@ export default function Home() {
     if (!folderInput.value) return;
     await fetch("/api/create-folder", {
       method: "POST",
-      body: JSON.stringify({ folder: folderInput.value + "/" }),
+      body: JSON.stringify({ folder: prefix + folderInput.value + "/" }),
       headers: { "Content-Type": "application/json" },
     });
     window.location.reload();
+  };
+
+  // Filter out empty folder placeholder files
+  const getActualFiles = (objects: any[]) => {
+    if (!objects) return [];
+    return objects.filter(obj => {
+      // Filter out folder placeholders (objects ending with "/" and having 0 size)
+      const isEmptyFolder = obj.Key.endsWith("/") && (obj.Size === 0 || obj.Size === undefined);
+      const isCurrentPrefix = obj.Key === prefix; // Filter out the current folder itself
+      return !isEmptyFolder && !isCurrentPrefix;
+    });
   };
 
   return (
@@ -81,8 +92,16 @@ export default function Home() {
               className="w-28 h-24 object-contain bg-blue-900 rounded-xl p-2"
             />
           </div>
+          
+          {/* Breadcrumb */}
+          {prefix && (
+            <div className="mb-6 text-sm text-blue-600">
+              <span>Current location: /{prefix}</span>
+            </div>
+          )}
+
           <div className="mb-10 flex flex-col md:flex-row items-center gap-6">
-            {/* Upload to root */}
+            {/* Upload to current directory */}
             <form className="flex gap-2" onSubmit={handleRootUpload}>
               <input type="file" name="file" className="border rounded px-2 py-1" />
               <button
@@ -92,7 +111,8 @@ export default function Home() {
                 Upload File
               </button>
             </form>
-            {/* Create folder at root */}
+            
+            {/* Create folder in current directory */}
             <form className="flex gap-2" onSubmit={handleCreateFolder}>
               <input type="text" name="folder" placeholder="New folder name" className="border rounded px-2 py-1" />
               <button
@@ -102,6 +122,7 @@ export default function Home() {
                 Create Folder
               </button>
             </form>
+            
             {prefix && (
               <button
                 onClick={handleBack}
@@ -113,13 +134,14 @@ export default function Home() {
               </button>
             )}
           </div>
+
           {!data ? (
             <div className="flex justify-center items-center h-32">
               <span className="animate-spin h-8 w-8 text-blue-400">⏳</span>
             </div>
           ) : (
             <div>
-              {/* Folders at root */}
+              {/* Folders */}
               {data.folders.length > 0 && (
                 <div className="mb-10">
                   <h2 className="text-2xl font-bold text-blue-700 mb-4">Folders</h2>
@@ -138,50 +160,54 @@ export default function Home() {
                   </ul>
                 </div>
               )}
-              {/* Files at root */}
-              {data.objects.length > 0 && (
-                <div>
-                  <h2 className="text-2xl font-bold text-blue-700 mb-4">Exams & Materials</h2>
-                  <ul className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    {data.objects.map((file) => (
-                      <li
-                        key={file.Key}
-                        className="bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center justify-between transition transform hover:-translate-y-2 hover:shadow-3xl border border-blue-100"
-                      >
-                        <div className="flex flex-col items-center">
-                          <FileText className="text-blue-600 w-12 h-12 mb-3" />
-                          <span className="font-semibold text-blue-900 text-lg text-center break-words">
+
+              {/* Files - Only show actual files, not folder placeholders */}
+              {(() => {
+                const actualFiles = getActualFiles(data.objects);
+                return actualFiles.length > 0 && (
+                  <div>
+                    <h2 className="text-2xl font-bold text-blue-700 mb-4">Exams & Materials</h2>
+                    <ul className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                      {actualFiles.map(file => (
+                        <div key={file.Key} className="flex flex-col items-start bg-gray-50 p-4 rounded-xl shadow">
+                          <FileText className="text-blue-500 w-7 h-7 mb-2" />
+                          <div className="font-medium truncate mb-2" title={file.Key.split("/").pop()}>
                             {file.Key.split("/").pop()}
-                          </span>
-                          <div className="text-xs text-gray-500 mt-2 text-center">
-                            {file.Size} bytes<br />
-                            {file.LastModified ? new Date(file.LastModified).toLocaleString() : ""}
+                          </div>
+                          <div className="text-xs text-gray-500 mb-3">
+                            Size: {file.Size ? (file.Size / 1024).toFixed(1) + ' KB' : 'Unknown'}
+                          </div>
+                          <div className="flex gap-2 mt-auto">
+                            <button
+                              className="px-3 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700 transition flex items-center shadow-lg font-medium"
+                              onClick={() => window.open(`https://${BUCKET}.s3.${REGION}.amazonaws.com/${file.Key}`, "_blank")}
+                              title="View"
+                            >
+                              View
+                            </button>
+                            <button
+                              className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 transition flex items-center shadow-lg font-medium"
+                              onClick={() => handleDownload(file.Key)}
+                              title="Download"
+                            >
+                              <Download className="w-4 h-4 mr-1" /> 
+                              Download
+                            </button>
                           </div>
                         </div>
-                        <div className="flex gap-2 mt-6">
-                          <button
-                            className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 transition flex items-center shadow-lg font-semibold"
-                            onClick={() => window.open(`https://${BUCKET}.s3.${REGION}.amazonaws.com/${file.Key}`, "_blank")}
-                            title="View"
-                          >
-                            View
-                          </button>
-                          <button
-                            className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition flex items-center shadow-lg font-semibold"
-                            onClick={() => handleDownload(file.Key)}
-                            title="Download"
-                          >
-                            <Download className="w-4 h-4 mr-2" />
-                            Download
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
+
+              {/* Empty state */}
+              {data.folders.length === 0 && getActualFiles(data.objects).length === 0 && (
+                <div className="text-center text-gray-500 mt-8 py-12">
+                  <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-lg">This folder is empty</p>
+                  <p className="text-sm">Upload files or create folders to get started</p>
                 </div>
-              )}
-              {data.folders.length === 0 && data.objects.length === 0 && (
-                <div className="text-center text-gray-500 mt-8">No files or folders found.</div>
               )}
             </div>
           )}
